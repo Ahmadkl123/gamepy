@@ -1,9 +1,10 @@
 # ============================================================
 # entities/player.py - Player character with full mechanics
 # ============================================================
+import math
 import pygame
 from settings import *
-from utils import draw_bar
+from utils import draw_bar, draw_chip, draw_ring, heart_icon, measure_chip
 
 
 class Player(pygame.sprite.Sprite):
@@ -66,6 +67,13 @@ class Player(pygame.sprite.Sprite):
         # Hitbox for attack
         self.attack_rect = pygame.Rect(0, 0, 0, 0)
 
+        # Optional SoundManager (set by Game after construction)
+        self.sfx = None
+
+    def _play(self, name):
+        if self.sfx is not None:
+            self.sfx.play(name)
+
     def handle_input(self, keys, mouse_buttons, particles):
         if not self.alive:
             return
@@ -114,6 +122,8 @@ class Player(pygame.sprite.Sprite):
             self.vel_y = JUMP_POWER
             self.on_ground = False
             self.jumps_left -= 1
+            self._play('jump')
+            dbg(f"Player.jump -> jumped, {self.jumps_left} jump(s) left")
 
     def _try_dash(self, particles):
         if self.dash_cd == 0 and not self.dashing:
@@ -124,6 +134,8 @@ class Player(pygame.sprite.Sprite):
             for _ in range(6):
                 particles.emit(self.rect.centerx, self.rect.centery,
                                CYAN, count=3, speed=4, life=18, size=4, gravity=0)
+            self._play('dash')
+            dbg(f"Player._try_dash -> dashing dir={self.dash_dir}")
 
     def _try_attack(self, particles):
         if self.attack_cd == 0:
@@ -139,6 +151,8 @@ class Player(pygame.sprite.Sprite):
             for _ in range(5):
                 particles.emit(self.attack_rect.centerx, self.attack_rect.centery,
                                (255, 240, 140), count=4, speed=5, life=12, size=3)
+            self._play('attack')
+            dbg(f"Player._try_attack -> attacking facing={self.facing}")
 
     def update(self, platforms, particles):
         if self.inv_timer > 0:
@@ -236,8 +250,11 @@ class Player(pygame.sprite.Sprite):
             self.shielded = False
             particles.emit(self.rect.centerx, self.rect.centery,
                            CYAN, count=12, speed=5, life=25, size=4)
+            self._play('shield_block')
+            dbg("Player.take_damage -> shield absorbed the hit")
             return
         self.hp -= amount
+        dbg(f"Player.take_damage -> took {amount}, hp = {self.hp}/{self.max_hp}")
         self.inv_timer = PLAYER_INVINCIBLE
         self.hurt_timer = 14
         self.dashing = False
@@ -249,8 +266,11 @@ class Player(pygame.sprite.Sprite):
         if self.hp <= 0:
             self.hp = 0
             self.die()
+        else:
+            self._play('hit')
 
     def die(self, immediate=False):
+        dbg(f"Player.die -> player dead (immediate={immediate})")
         self.alive = False
         self.dashing = False
         self.attacking = False
@@ -264,6 +284,7 @@ class Player(pygame.sprite.Sprite):
         if immediate:
             self.vel_x = 0
             self.vel_y = 0
+        self._play('player_die')
 
     def collect_coin(self, particles):
         self.score += COIN_VALUE
@@ -274,41 +295,111 @@ class Player(pygame.sprite.Sprite):
         self.speed_boost = 300
         particles.emit(self.rect.centerx, self.rect.centery,
                        YELLOW, count=12, speed=5, life=25, size=4)
+        self._play('powerup')
+        dbg("Player.apply_speed_bonus -> speed boost active (300 frames)")
 
     def apply_shield_bonus(self, particles):
         self.shielded = True
         particles.emit(self.rect.centerx, self.rect.centery,
                        CYAN, count=12, speed=5, life=25, size=4)
+        self._play('powerup')
+        dbg("Player.apply_shield_bonus -> shield active")
 
     def add_score(self, pts):
         self.score += pts
 
     def draw_hud(self, surface, coin_icon=None):
-        draw_bar(surface, 20, 20, 180, 18, self.hp, self.max_hp, RED)
-        font = pygame.font.SysFont("Arial", 15, bold=True)
-        surface.blit(font.render(f"HP: {self.hp}/{self.max_hp}", True, WHITE), (28, 22))
+        font_small = pygame.font.SysFont("Arial", 14, bold=True)
+        font_med   = pygame.font.SysFont("Arial", 20, bold=True)
+        font_big   = pygame.font.SysFont("Arial", 26, bold=True)
 
-        font_big = pygame.font.SysFont("Arial", 22, bold=True)
-        surface.blit(font_big.render(f"Score: {self.score}", True, GOLD),
-                     (SCREEN_W // 2 - 70, 14))
+        # ── HP HEARTS (top-left) ─────────────────────────
+        heart_size = 26
+        gap = 4
+        for i in range(self.max_hp):
+            hx = 20 + i * (heart_size + gap)
+            surface.blit(heart_icon(heart_size, filled=(i < self.hp)), (hx, 16))
 
-        if coin_icon:
-            icon_rect = coin_icon.get_rect(topleft=(SCREEN_W - 150, 10))
-            surface.blit(coin_icon, icon_rect)
-            surface.blit(font_big.render(f"{self.coins}", True, YELLOW),
-                         (icon_rect.right + 8, 14))
-        else:
-            surface.blit(font_big.render(f"{self.coins}", True, YELLOW),
-                         (SCREEN_W - 110, 14))
+        # ── SCORE CHIP (top-center) ───────────────────────
+        score_text = f"SCORE   {self.score}"
+        sw, _ = measure_chip(score_text, font_big)
+        draw_chip(surface, SCREEN_W // 2 - sw // 2, 12, score_text, font_big,
+                  fg=GOLD, bg=(20, 14, 32), border=(180, 140, 60))
 
-        y = 48
+        # ── COIN CHIP (top-right) ─────────────────────────
+        coin_text = f"{self.coins}"
+        cw, _ = measure_chip(coin_text, font_med, icon=coin_icon)
+        draw_chip(surface, SCREEN_W - cw - 20, 14, coin_text, font_med,
+                  fg=YELLOW, bg=(20, 14, 32),
+                  border=(200, 160, 50), icon=coin_icon)
+
+        # ── ACTIVE BONUS BADGES (under hearts) ────────────
+        bonus_x = 20
+        bonus_y = 16 + heart_size + 22  # below hearts and the lives strip
         if self.speed_boost > 0:
-            surface.blit(font.render("SPEED", True, YELLOW), (20, y))
-            y += 18
+            pct = self.speed_boost / 300.0
+            self._draw_bonus_badge(surface, bonus_x, bonus_y,
+                                   label="SPD", color=YELLOW,
+                                   icon_shape='bolt', pct=pct)
+            bonus_x += 70
         if self.shielded:
-            surface.blit(font.render("SHIELD", True, CYAN), (20, y))
+            self._draw_bonus_badge(surface, bonus_x, bonus_y,
+                                   label="SHD", color=CYAN,
+                                   icon_shape='shield', pct=1.0)
 
+        # ── DASH COOLDOWN RING (bottom-left) ──────────────
+        ring_cx, ring_cy = 50, SCREEN_H - 50
         if self.dash_cd > 0:
             pct = 1 - self.dash_cd / DASH_CD
-            draw_bar(surface, 20, SCREEN_H - 30, 80, 8, pct, 1, CYAN, DARK_GREY)
-            surface.blit(font.render("DASH", True, CYAN), (20, SCREEN_H - 44))
+            draw_ring(surface, ring_cx, ring_cy, 22, pct,
+                      color=CYAN, bg=(30, 50, 70), width=5)
+            label_col = (140, 200, 220)
+        else:
+            # Ready: solid bright ring
+            draw_ring(surface, ring_cx, ring_cy, 22, 1.0,
+                      color=(120, 220, 220), bg=(30, 50, 70), width=5)
+            # Soft pulse halo when ready
+            t = pygame.time.get_ticks() / 200.0
+            halo_r = 26 + int(abs(math.sin(t)) * 3)
+            halo = pygame.Surface((halo_r * 2, halo_r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(halo, (120, 220, 220, 35), (halo_r, halo_r), halo_r)
+            surface.blit(halo, (ring_cx - halo_r, ring_cy - halo_r),
+                         special_flags=pygame.BLEND_RGBA_ADD)
+            label_col = (180, 230, 240)
+        label = font_small.render("DASH", True, label_col)
+        surface.blit(label, (ring_cx - label.get_width() // 2, ring_cy + 28))
+
+    def _draw_bonus_badge(self, surface, x, y, label, color, icon_shape, pct):
+        """Small badge with icon + countdown ring + caption."""
+        size = 38
+        # Backdrop
+        bd = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.rect(bd, (20, 14, 32, 220), (0, 0, size, size), border_radius=8)
+        pygame.draw.rect(bd, (*color, 255), (0, 0, size, size), 2, border_radius=8)
+        surface.blit(bd, (x, y))
+
+        cx, cy = x + size // 2, y + size // 2
+        # Icon
+        if icon_shape == 'bolt':
+            pts = [(cx - 4, cy - 9), (cx + 5, cy - 2),
+                   (cx + 1, cy - 2), (cx + 4, cy + 9),
+                   (cx - 5, cy + 1), (cx - 1, cy + 1)]
+            pygame.draw.polygon(surface, color, pts)
+        elif icon_shape == 'shield':
+            pygame.draw.polygon(surface, color, [
+                (cx, cy - 10), (cx + 9, cy - 4), (cx + 7, cy + 7),
+                (cx, cy + 10), (cx - 7, cy + 7), (cx - 9, cy - 4)
+            ])
+            pygame.draw.polygon(surface, (20, 14, 32), [
+                (cx, cy - 6), (cx + 5, cy - 2), (cx + 4, cy + 4),
+                (cx, cy + 6), (cx - 4, cy + 4), (cx - 5, cy - 2)
+            ], 1)
+
+        # Countdown ring around the badge
+        draw_ring(surface, cx, cy, size // 2 + 4, pct,
+                  color=color, bg=(40, 30, 60), width=3)
+
+        # Caption below
+        cap_font = pygame.font.SysFont("Arial", 11, bold=True)
+        cap = cap_font.render(label, True, color)
+        surface.blit(cap, (x + (size - cap.get_width()) // 2, y + size + 2))

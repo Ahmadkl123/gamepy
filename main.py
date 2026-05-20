@@ -16,7 +16,10 @@
 #   Q                — Quit
 #
 from game import Game
+from settings import dbg
 
 if __name__ == '__main__':
+    dbg("main.py -> starting Whispering Caverns")
     g = Game()
+    dbg("main.py -> Game created, entering main loop")
     g.run()

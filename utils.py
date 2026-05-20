@@ -16,6 +16,14 @@ class Camera:
         self.y = 0.0
         self.world_w = world_w
         self.world_h = world_h
+        self.shake_intensity = 0.0
+        self.shake_decay     = 0.85
+        self._shake_ox = 0
+        self._shake_oy = 0
+
+    def shake(self, intensity):
+        """Trigger a screen shake. Larger = more violent."""
+        self.shake_intensity = max(self.shake_intensity, float(intensity))
 
     def update(self, target_rect):
         # Target: center of screen on player
@@ -28,13 +36,27 @@ class Camera:
         self.x += (tx - self.x) * CAM_SMOOTH * 8
         self.y += (ty - self.y) * CAM_SMOOTH * 8
 
+        # Shake offset (applied additively at render time via apply/apply_pos)
+        if self.shake_intensity > 0.2:
+            self._shake_ox = random.randint(-int(self.shake_intensity),
+                                             int(self.shake_intensity))
+            self._shake_oy = random.randint(-int(self.shake_intensity),
+                                             int(self.shake_intensity))
+            self.shake_intensity *= self.shake_decay
+        else:
+            self.shake_intensity = 0.0
+            self._shake_ox = 0
+            self._shake_oy = 0
+
     def apply(self, rect):
         """Return a rect shifted to screen space."""
-        return pygame.Rect(rect.x - int(self.x), rect.y - int(self.y),
+        return pygame.Rect(rect.x - int(self.x) + self._shake_ox,
+                           rect.y - int(self.y) + self._shake_oy,
                            rect.w, rect.h)
 
     def apply_pos(self, x, y):
-        return x - int(self.x), y - int(self.y)
+        return (x - int(self.x) + self._shake_ox,
+                y - int(self.y) + self._shake_oy)
 
 
 # ─────────────────────────────────────────────
@@ -123,3 +145,114 @@ def draw_bar(surface, x, y, w, h, value, maxval, color, bg=DARK_GREY):
 
 def lerp_color(c1, c2, t):
     return tuple(int(a + (b-a)*t) for a, b in zip(c1, c2))
+
+
+# ─────────────────────────────────────────────
+#  UI WIDGETS (chips, keycaps, ring gauges, hearts)
+# ─────────────────────────────────────────────
+def measure_chip(text, font, padding=10, icon=None, icon_gap=8):
+    """Return (w, h) the chip will take WITHOUT drawing it."""
+    text_img = font.render(text, True, (0, 0, 0))
+    h = max(text_img.get_height(), icon.get_height() if icon else 0) + padding
+    icon_w = (icon.get_width() + icon_gap) if icon else 0
+    w = text_img.get_width() + icon_w + padding * 2
+    return w, h
+
+
+def draw_chip(surface, x, y, text, font, fg=WHITE,
+              bg=(20, 14, 32), border=(120, 80, 200),
+              padding=10, radius=10, icon=None, icon_gap=8):
+    """Draw a rounded pill 'chip' with text (+ optional icon on the left).
+    Returns the chip rect for layout chaining."""
+    text_img = font.render(text, True, fg)
+    h = max(text_img.get_height(), icon.get_height() if icon else 0) + padding
+    icon_w = (icon.get_width() + icon_gap) if icon else 0
+    w = text_img.get_width() + icon_w + padding * 2
+
+    rect = pygame.Rect(x, y, w, h)
+    chip = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(chip, (*bg, 220), (0, 0, w, h), border_radius=radius)
+    pygame.draw.rect(chip, (*border, 255), (0, 0, w, h), 2, border_radius=radius)
+    surface.blit(chip, (x, y))
+
+    cy = y + (h - text_img.get_height()) // 2
+    cx = x + padding
+    if icon:
+        iy = y + (h - icon.get_height()) // 2
+        surface.blit(icon, (cx, iy))
+        cx += icon.get_width() + icon_gap
+    surface.blit(text_img, (cx, cy))
+    return rect
+
+
+def draw_keycap(surface, x, y, text, font,
+                fg=(240, 240, 250), bg=(35, 28, 55),
+                border=(140, 110, 200), min_w=32, h=32, radius=8):
+    """Render a key cap (e.g. ENTER, F, ←). Returns the cap rect."""
+    text_img = font.render(text, True, fg)
+    w = max(min_w, text_img.get_width() + 14)
+    cap = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(cap, (*bg, 240), (0, 0, w, h), border_radius=radius)
+    pygame.draw.rect(cap, (*border, 255), (0, 0, w, h), 2, border_radius=radius)
+    # bottom shading line
+    pygame.draw.line(cap, (10, 6, 18), (4, h - 3), (w - 4, h - 3), 1)
+    surface.blit(cap, (x, y))
+    surface.blit(text_img,
+                 (x + (w - text_img.get_width()) // 2,
+                  y + (h - text_img.get_height()) // 2))
+    return pygame.Rect(x, y, w, h)
+
+
+def draw_ring(surface, cx, cy, radius, pct,
+              color=WHITE, bg=(40, 30, 60), width=4):
+    """Draw a circular progress ring. pct in [0..1]."""
+    pct = max(0.0, min(1.0, pct))
+    # background ring
+    pygame.draw.circle(surface, bg, (cx, cy), radius, width)
+    if pct <= 0:
+        return
+    # foreground arc
+    rect = pygame.Rect(cx - radius, cy - radius, radius * 2, radius * 2)
+    start = -math.pi / 2
+    end   = start + 2 * math.pi * pct
+    try:
+        pygame.draw.arc(surface, color, rect, start, end, width)
+    except TypeError:
+        # fallback: full circle when arc isn't supported
+        pygame.draw.circle(surface, color, (cx, cy), radius, width)
+
+
+_HEART_CACHE = {}
+
+def heart_icon(size=22, filled=True, color=(235, 60, 80), dim=(50, 24, 30)):
+    """Return a (cached) heart-shaped surface."""
+    key = (size, filled, color, dim)
+    if key in _HEART_CACHE:
+        return _HEART_CACHE[key]
+
+    s = pygame.Surface((size, size), pygame.SRCALPHA)
+    r = size // 4
+    base = color if filled else dim
+    border = (255, 220, 220) if filled else (110, 60, 70)
+
+    # Two lobes + triangle body
+    cx1, cy = r + 1, r + 2
+    cx2     = size - r - 1
+    pygame.draw.circle(s, base, (cx1, cy), r)
+    pygame.draw.circle(s, base, (cx2, cy), r)
+    pts = [(1, cy), (size - 1, cy), (size // 2, size - 2)]
+    pygame.draw.polygon(s, base, pts)
+
+    # Outline
+    pygame.draw.circle(s, border, (cx1, cy), r, 1)
+    pygame.draw.circle(s, border, (cx2, cy), r, 1)
+    pygame.draw.polygon(s, border, pts, 1)
+
+    # Highlight
+    if filled:
+        hl = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(hl, (255, 220, 230, 110), (cx1 - 1, cy - 1), r // 2)
+        s.blit(hl, (0, 0))
+
+    _HEART_CACHE[key] = s
+    return s

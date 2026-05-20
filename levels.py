@@ -3,7 +3,7 @@
 # ============================================================
 import pygame, random
 from settings import *
-from entities.powerup import Coin, PowerUp
+from entities.powerup import Coin, PowerUp, Checkpoint, Chest
 
 
 # ─────────────────────────────────────────────
@@ -122,6 +122,12 @@ LEVEL_1 = {
         ('speed', 1000, 440),
         ('shield', 2600, 310),
     ],
+
+    # Checkpoint torches - x is the torch FOOT center (must sit inside a platform)
+    'checkpoints': [
+        (1320, 840),   # mid-stage ground
+        (2520, 840),   # late-stage ground
+    ],
 }
 
 LEVEL_2 = {
@@ -193,6 +199,12 @@ LEVEL_2 = {
         ('speed',  1600, 620),
         ('shield', 3000, 300),
         ('speed',  3700, 340),
+    ],
+
+    'checkpoints': [
+        (1500, 700),   # centered on the 1400-1640 / y=700 platform
+        (2800, 500),   # centered on the 2700-2940 / y=500 platform
+        (4060, 420),   # centered on the 3900-4260 / y=420 platform
     ],
 }
 
@@ -272,6 +284,19 @@ LEVEL_3 = {
         ('speed',  3300, 230),
         ('shield', 4100, 180),
     ],
+
+    'checkpoints': [
+        (1450, 720),   # centered on the 1350-1550 / y=720 platform
+        (2720, 420),   # centered on the 2600-2840 / y=420 platform
+        (3780, 200),   # centered on the 3700-3860 / y=200 platform
+    ],
+
+    # Treasure chest — (foot_center_x, foot_center_y). Sits on the exit
+    # ledge (4600-4800 / y=480) just right of the door: a final reward
+    # before escaping the caverns.
+    'chests': [
+        (4770, 480),
+    ],
 }
 
 BOSS_LEVEL = {
@@ -301,18 +326,22 @@ BOSS_LEVEL = {
         (1600, 650, 150, 24, 'crystal'),
         (1800, 600, 140, 24, 'crystal'),
         (2000, 650, 150, 24, 'crystal'),
-        
+
         # Walls
         (2480, 400, 80, 620, 'stone'),
         (0, 400, 80, 520, 'stone'),
-        
+
         # Ceiling
         (0, 0, 2560, 100, 'stone'),
-        
+
         # Elevated platforms above
         (400, 350, 200, 24, 'crystal'),
         (1100, 300, 200, 24, 'crystal'),
         (1800, 350, 200, 24, 'crystal'),
+
+        # Path to the exit door (right ledge)
+        (2100, 540, 200, 24, 'crystal'),
+        (2200, 428, 280, 24, 'stone'),
     ],
 
     'hazards': [],
@@ -328,6 +357,9 @@ BOSS_LEVEL = {
         ('shield', 1000, 250),
         ('speed',  1500, 250),
     ],
+
+    # No mid-arena checkpoints in the boss room - the room is the gauntlet.
+    'checkpoints': [],
 }
 
 ALL_LEVELS = [LEVEL_1, BOSS_LEVEL, LEVEL_2, LEVEL_3]
@@ -337,15 +369,20 @@ ALL_LEVELS = [LEVEL_1, BOSS_LEVEL, LEVEL_2, LEVEL_3]
 #  LEVEL BUILDER
 # ─────────────────────────────────────────────
 def build_level(level_data, tile_surfs, coin_frames, powerup_surfs,
-                enemy_frames, PlayerClass, EnemyCls):
+                enemy_frames, PlayerClass, EnemyCls, chest_frames=None):
     """Instantiate all sprites from a level dict."""
     from entities.enemy import Crawler, Flyer, Golem
 
-    platforms  = pygame.sprite.Group()
-    hazards    = pygame.sprite.Group()
-    enemies    = pygame.sprite.Group()
-    coins      = pygame.sprite.Group()
-    powerups   = pygame.sprite.Group()
+    dbg(f"build_level -> assembling {level_data['name']!r} "
+        f"({level_data['world_w']}x{level_data['world_h']})")
+
+    platforms   = pygame.sprite.Group()
+    hazards     = pygame.sprite.Group()
+    enemies     = pygame.sprite.Group()
+    coins       = pygame.sprite.Group()
+    powerups    = pygame.sprite.Group()
+    checkpoints = pygame.sprite.Group()
+    chests      = pygame.sprite.Group()
 
     # --- Platforms ---
     for (x, y, w, h, tile_key) in level_data['platforms']:
@@ -371,8 +408,22 @@ def build_level(level_data, tile_surfs, coin_frames, powerup_surfs,
     for (kind, px, py) in level_data.get('powerups', []):
         powerups.add(PowerUp(px, py, kind, powerup_surfs[kind]))
 
+    # --- Checkpoint torches ---
+    for (cx, cy) in level_data.get('checkpoints', []):
+        checkpoints.add(Checkpoint(cx, cy))
+
+    # --- Treasure chests --- (only built if the caller supplied sprites)
+    if chest_frames:
+        for (cx, cy) in level_data.get('chests', []):
+            chests.add(Chest(cx, cy, chest_frames))
+
     # --- Player ---
     sx, sy = level_data['player_start']
     player = PlayerClass(sx, sy, enemy_frames['player'])
 
-    return player, platforms, hazards, enemies, coins, powerups
+    dbg(f"build_level -> spawned player at {(sx, sy)}, "
+        f"{len(platforms)} platforms, {len(hazards)} hazards, "
+        f"{len(chests)} chests")
+
+    return (player, platforms, hazards, enemies, coins, powerups,
+            checkpoints, chests)

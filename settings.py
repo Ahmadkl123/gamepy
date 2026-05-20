@@ -76,6 +76,10 @@ COIN_SPIN_SPD = 4   # animation frames per frame
 HIGHSCORE_FILE = "data/highscore.json"
 LEVEL_BONUS    = 500
 
+# --- Treasure chest (final-stage reward) ---
+CHEST_SCORE    = 1000   # score granted when the chest is opened
+CHEST_LIVES    = 1      # extra lives granted when the chest is opened
+
 # --- Camera ---
 CAM_SMOOTH    = 0.12   # 0=instant, 1=never moves
 
@@ -86,3 +90,15 @@ MAX_PARTICLES = 200
 LEVEL_COUNT   = 4
 EXIT_W        = 72
 EXIT_H        = 128
+
+# --- Lives & checkpoints ---
+START_LIVES   = 3
+
+# --- Debug ---
+# Flip DEBUG to False to silence all the flow-tracing echoes at once.
+DEBUG = True
+
+def dbg(*args):
+    """Echo a flow-tracing message to the console when DEBUG is on."""
+    if DEBUG:
+        print("[WC]", *args)

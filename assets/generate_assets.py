@@ -303,6 +303,63 @@ def make_powerup_surfaces():
     return {'speed': speed, 'shield': shield}
 
 
+def make_chest_frames():
+    """Procedural treasure chest — 'closed' and 'open' frames.
+
+    Both frames share the same canvas size so the sprite can be swapped
+    on open() without having to re-anchor the entity.
+    """
+    W, H = 40, 34
+    wood_dark  = (90, 55, 28)
+    wood_mid   = (130, 82, 40)
+    wood_light = (165, 110, 58)
+    metal      = (210, 180, 70)    # brass bands / lock
+    metal_dk   = (150, 120, 40)
+    glow_gold  = (255, 215, 90)
+
+    def _body(s):
+        # lower box + plank lines + central brass band
+        pygame.draw.rect(s, wood_mid,  (4, 16, W - 8, H - 16), border_radius=3)
+        pygame.draw.rect(s, wood_dark, (4, 16, W - 8, H - 16), 2, border_radius=3)
+        for px in range(10, W - 6, 8):
+            pygame.draw.line(s, wood_dark, (px, 18), (px, H - 3), 1)
+        pygame.draw.rect(s, metal,    (W // 2 - 3, 16, 6, H - 18))
+        pygame.draw.rect(s, metal_dk, (W // 2 - 3, 16, 6, H - 18), 1)
+
+    # --- closed ---
+    closed = pygame.Surface((W, H), pygame.SRCALPHA)
+    _body(closed)
+    pygame.draw.rect(closed, wood_light, (3, 6, W - 6, 14),
+                     border_top_left_radius=7, border_top_right_radius=7)
+    pygame.draw.rect(closed, wood_dark, (3, 6, W - 6, 14), 2,
+                     border_top_left_radius=7, border_top_right_radius=7)
+    pygame.draw.rect(closed, metal, (3, 17, W - 6, 4))          # lid/body seam
+    pygame.draw.rect(closed, metal,    (W // 2 - 4, 15, 8, 8), border_radius=2)
+    pygame.draw.rect(closed, metal_dk, (W // 2 - 4, 15, 8, 8), 1, border_radius=2)
+    pygame.draw.circle(closed, wood_dark, (W // 2, 19), 2)      # keyhole
+
+    # --- open ---
+    opened = pygame.Surface((W, H), pygame.SRCALPHA)
+    for r in range(15, 0, -2):                                 # inner gold glow
+        a = int(130 * (1 - r / 15))
+        pygame.draw.circle(opened, (*glow_gold, a), (W // 2, 13), r)
+    _body(opened)
+    pygame.draw.ellipse(opened, glow_gold, (8, 11, W - 16, 9))  # treasure mound
+    for cx in (W // 2 - 7, W // 2, W // 2 + 7):
+        pygame.draw.circle(opened, (255, 235, 140), (cx, 14), 3)
+        pygame.draw.circle(opened, WHITE, (cx - 1, 13), 1)
+    lid = pygame.Surface((W - 6, 14), pygame.SRCALPHA)          # lid, tilted back
+    pygame.draw.rect(lid, wood_light, (0, 0, W - 6, 14),
+                     border_top_left_radius=7, border_top_right_radius=7)
+    pygame.draw.rect(lid, wood_dark, (0, 0, W - 6, 14), 2,
+                     border_top_left_radius=7, border_top_right_radius=7)
+    pygame.draw.rect(lid, metal, (0, 10, W - 6, 3))
+    lid = pygame.transform.rotate(lid, 22)
+    opened.blit(lid, (1, -5))
+
+    return {'closed': closed, 'open': opened}
+
+
 def make_exit_surface():
     """Load the level exit door art, preserving its aspect ratio."""
     door_path = os.path.join(os.path.dirname(__file__), 'images', 'doors', 'Door 6.png')
